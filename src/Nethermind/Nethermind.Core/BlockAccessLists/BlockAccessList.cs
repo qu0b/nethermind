@@ -159,11 +159,19 @@ public struct BlockAccessList : IEquatable<BlockAccessList>, IJournal<int>
         accountChanges.AddNonceChange(nonceChange);
     }
 
-    public readonly void AddAccountRead(Address address)
+    public void AddAccountRead(Address address)
     {
         if (!_accountChanges.ContainsKey(address))
         {
             _accountChanges.Add(address, new(address));
+
+            // Journal the addition so it can be reverted
+            _changes.Push(new()
+            {
+                Address = address,
+                Type = ChangeType.AccountRead,
+                BlockAccessIndex = Index
+            });
         }
     }
 
@@ -192,20 +200,30 @@ public struct BlockAccessList : IEquatable<BlockAccessList>, IJournal<int>
         }
     }
 
-    public readonly void AddStorageRead(in StorageCell storageCell)
+    public void AddStorageRead(in StorageCell storageCell)
     {
         byte[] key = new byte[32];
         storageCell.Index.ToBigEndian(key);
         AddStorageRead(storageCell.Address, key);
     }
 
-    public readonly void AddStorageRead(Address address, byte[] key)
+    public void AddStorageRead(Address address, byte[] key)
     {
         AccountChanges accountChanges = GetOrAddAccountChanges(address);
 
-        if (!accountChanges.HasStorageChange(key))
+        // Only add if not already a storage change and not already a storage read
+        if (!accountChanges.HasStorageChange(key) && !accountChanges.HasStorageRead(key))
         {
             accountChanges.AddStorageRead(key);
+
+            // Journal the addition so it can be reverted
+            _changes.Push(new()
+            {
+                Address = address,
+                Slot = key,
+                Type = ChangeType.StorageRead,
+                BlockAccessIndex = Index
+            });
         }
     }
 
@@ -262,7 +280,14 @@ public struct BlockAccessList : IEquatable<BlockAccessList>, IJournal<int>
         while (_changes.Count > snapshot)
         {
             Change change = _changes.Pop();
-            AccountChanges accountChanges = _accountChanges[change.Address];
+
+            // Account might have been removed by a later restore operation (e.g., AccountRead removing empty account).
+            // In that case, skip this entry as the account cleanup was already handled.
+            if (!_accountChanges.TryGetValue(change.Address, out AccountChanges? accountChanges))
+            {
+                continue;
+            }
+
             switch (change.Type)
             {
                 case ChangeType.BalanceChange:
@@ -305,6 +330,24 @@ public struct BlockAccessList : IEquatable<BlockAccessList>, IJournal<int>
                     }
 
                     accountChanges.ClearEmptySlotChangesAndAddRead(change.Slot!);
+                    break;
+
+                case ChangeType.AccountRead:
+                    // Remove the account entry if it has no other changes
+                    // (was only added as an empty placeholder by AddAccountRead)
+                    if (accountChanges.IsEmpty())
+                    {
+                        _accountChanges.Remove(change.Address);
+                    }
+                    break;
+
+                case ChangeType.StorageRead:
+                    // Remove the storage read entry
+                    accountChanges.RemoveStorageRead(change.Slot!);
+                    // Note: We intentionally don't remove the account here even if empty.
+                    // The account might have been created by an earlier AddAccountRead or
+                    // other operation that hasn't been reverted yet. The account will be
+                    // cleaned up when the corresponding AccountRead entry is restored.
                     break;
             }
         }
@@ -436,7 +479,9 @@ public struct BlockAccessList : IEquatable<BlockAccessList>, IJournal<int>
         BalanceChange = 0,
         CodeChange = 1,
         NonceChange = 2,
-        StorageChange = 3
+        StorageChange = 3,
+        AccountRead = 4,
+        StorageRead = 5
     }
 
     private readonly struct Change

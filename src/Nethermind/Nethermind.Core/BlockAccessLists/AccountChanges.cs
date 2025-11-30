@@ -121,6 +121,20 @@ public class AccountChanges : IEquatable<AccountChanges>
     public void RemoveStorageRead(byte[] key)
         => _storageReads.Remove(new(key));
 
+    public bool HasStorageRead(byte[] key)
+        => _storageReads.Contains(new(key));
+
+    /// <summary>
+    /// Returns true if the account has no changes (no balance, nonce, code, storage changes, or storage reads).
+    /// Used to determine if an account entry can be removed during journal restore.
+    /// </summary>
+    public bool IsEmpty()
+        => _balanceChanges.Count == 0
+           && _nonceChanges.Count == 0
+           && _codeChanges.Count == 0
+           && _storageChanges.Count == 0
+           && _storageReads.Count == 0;
+
     public void SelfDestruct()
     {
         foreach (byte[] key in _storageChanges.Keys)
