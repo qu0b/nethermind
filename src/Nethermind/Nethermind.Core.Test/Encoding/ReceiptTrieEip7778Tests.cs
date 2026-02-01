@@ -29,7 +29,7 @@ public class ReceiptTrieEip7778Tests
     }
 
     [Test]
-    public void Receipts_root_includes_gas_spent_when_eip7778_enabled()
+    public void Receipts_root_ignores_gas_spent_when_eip7778_enabled()
     {
         TxReceipt baseReceipt = BuildReceipt(0);
         TxReceipt updatedReceipt = BuildReceipt(123);
@@ -38,7 +38,7 @@ public class ReceiptTrieEip7778Tests
         Hash256 root1 = ReceiptTrie.CalculateRoot(spec, new[] { baseReceipt }, Rlp.GetStreamDecoder<TxReceipt>()!);
         Hash256 root2 = ReceiptTrie.CalculateRoot(spec, new[] { updatedReceipt }, Rlp.GetStreamDecoder<TxReceipt>()!);
 
-        Assert.That(root2, Is.Not.EqualTo(root1));
+        Assert.That(root2, Is.EqualTo(root1));
     }
 
     private static TxReceipt BuildReceipt(long gasSpent)

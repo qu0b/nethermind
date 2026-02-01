@@ -125,13 +125,6 @@ namespace Nethermind.Serialization.Rlp
                     : Rlp.LengthOf(item.PostTransactionState);
             }
 
-            // EIP-7778: Include GasSpent in content length if flag is set and value is present
-            bool isEip7778Receipts = (rlpBehaviors & RlpBehaviors.Eip7778Receipts) == RlpBehaviors.Eip7778Receipts;
-            if (isEip7778Receipts && item.GasSpent.HasValue)
-            {
-                contentLength += Rlp.LengthOf(item.GasSpent.Value);
-            }
-
             return (contentLength, logsLength);
         }
 
@@ -188,8 +181,6 @@ namespace Nethermind.Serialization.Rlp
             int sequenceLength = Rlp.LengthOfSequence(totalContentLength);
 
             bool isEip658Receipts = (rlpBehaviors & RlpBehaviors.Eip658Receipts) == RlpBehaviors.Eip658Receipts;
-            bool isEip7778Receipts = (rlpBehaviors & RlpBehaviors.Eip7778Receipts) == RlpBehaviors.Eip7778Receipts;
-
             if (item.TxType != TxType.Legacy)
             {
                 if ((rlpBehaviors & RlpBehaviors.SkipTypedWrapping) == RlpBehaviors.None)
@@ -223,11 +214,6 @@ namespace Nethermind.Serialization.Rlp
                 rlpStream.Encode(logs[i]);
             }
 
-            // EIP-7778: Encode GasSpent after logs if flag is set and value is present
-            if (isEip7778Receipts && item.GasSpent.HasValue)
-            {
-                rlpStream.Encode(item.GasSpent.Value);
-            }
         }
     }
 }

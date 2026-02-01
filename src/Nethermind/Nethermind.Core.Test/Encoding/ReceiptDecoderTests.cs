@@ -270,7 +270,7 @@ namespace Nethermind.Core.Test.Encoding
         }
 
         [Test]
-        public void Receipt_message_decoder_reads_gas_spent_when_present()
+        public void Receipt_message_decoder_does_not_encode_gas_spent()
         {
             TxReceipt txReceipt = Build.A.Receipt.TestObject;
             txReceipt.Bloom = new Bloom();
@@ -280,14 +280,11 @@ namespace Nethermind.Core.Test.Encoding
             txReceipt.GasSpent = 123;
 
             ReceiptMessageDecoder decoder = new();
+            // GasSpent should not be encoded even with Eip7778Receipts flag (removed from spec)
             byte[] encoded = decoder.EncodeNew(txReceipt, RlpBehaviors.Eip7778Receipts);
 
-            // Decoding should succeed regardless of flag - GasSpent is read if present
-            TxReceipt decodedWithoutFlag = decoder.Decode(encoded.AsRlpStream(), RlpBehaviors.None);
-            Assert.That(decodedWithoutFlag.GasSpent, Is.EqualTo(txReceipt.GasSpent));
-
-            TxReceipt decodedWithFlag = decoder.Decode(encoded.AsRlpStream(), RlpBehaviors.Eip7778Receipts);
-            Assert.That(decodedWithFlag.GasSpent, Is.EqualTo(txReceipt.GasSpent));
+            TxReceipt decoded = decoder.Decode(encoded.AsRlpStream(), RlpBehaviors.None);
+            Assert.That(decoded.GasSpent, Is.Null);
         }
 
         [Test]
