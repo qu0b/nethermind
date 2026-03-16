@@ -35,6 +35,7 @@ public class AccountChanges : IEquatable<AccountChanges>
 
     private readonly SortedList<UInt256, SlotChanges> _storageChanges;
     private readonly SortedSet<StorageRead> _storageReads;
+    private readonly Dictionary<UInt256, ushort> _storageReadIndices;
     private readonly SortedList<ushort, BalanceChange> _balanceChanges;
     private readonly SortedList<ushort, NonceChange> _nonceChanges;
     private readonly SortedList<ushort, CodeChange> _codeChanges;
@@ -44,6 +45,7 @@ public class AccountChanges : IEquatable<AccountChanges>
         Address = Address.Zero;
         _storageChanges = [];
         _storageReads = [];
+        _storageReadIndices = [];
         _balanceChanges = [];
         _nonceChanges = [];
         _codeChanges = [];
@@ -54,6 +56,7 @@ public class AccountChanges : IEquatable<AccountChanges>
         Address = address;
         _storageChanges = [];
         _storageReads = [];
+        _storageReadIndices = [];
         _balanceChanges = [];
         _nonceChanges = [];
         _codeChanges = [];
@@ -64,6 +67,7 @@ public class AccountChanges : IEquatable<AccountChanges>
         Address = address;
         _storageChanges = storageChanges;
         _storageReads = storageReads;
+        _storageReadIndices = [];
         _balanceChanges = balanceChanges;
         _nonceChanges = nonceChanges;
         _codeChanges = codeChanges;
@@ -96,12 +100,12 @@ public class AccountChanges : IEquatable<AccountChanges>
     public bool TryGetSlotChanges(UInt256 key, [NotNullWhen(true)] out SlotChanges? slotChanges)
         => _storageChanges.TryGetValue(key, out slotChanges);
 
-    public void ClearEmptySlotChangesAndAddRead(UInt256 key)
+    public void ClearEmptySlotChangesAndAddRead(UInt256 key, ushort blockAccessIndex = 0)
     {
         if (TryGetSlotChanges(key, out SlotChanges? slotChanges) && slotChanges.Changes.Count == 0)
         {
             _storageChanges.Remove(key);
-            _storageReads.Add(new(key));
+            AddStorageRead(key, blockAccessIndex);
         }
     }
 
@@ -128,16 +132,40 @@ public class AccountChanges : IEquatable<AccountChanges>
     }
 
     public void AddStorageRead(UInt256 key)
-        => _storageReads.Add(new(key));
+        => AddStorageRead(key, 0);
+
+    public void AddStorageRead(UInt256 key, ushort blockAccessIndex)
+    {
+        if (_storageReads.Add(new(key)))
+        {
+            _storageReadIndices[key] = blockAccessIndex;
+        }
+    }
 
     public void RemoveStorageRead(UInt256 key)
-        => _storageReads.Remove(new(key));
+    {
+        _storageReads.Remove(new(key));
+        _storageReadIndices.Remove(key);
+    }
 
-    public void SelfDestruct()
+    public int StorageReadsCountAtIndex(ushort index)
+    {
+        int count = 0;
+        foreach (StorageRead read in _storageReads)
+        {
+            if (_storageReadIndices.TryGetValue(read.Key, out ushort readIndex) && readIndex == index)
+            {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    public void SelfDestruct(ushort blockAccessIndex = 0)
     {
         foreach (UInt256 key in _storageChanges.Keys)
         {
-            AddStorageRead(key);
+            AddStorageRead(key, blockAccessIndex);
         }
 
         _storageChanges.Clear();

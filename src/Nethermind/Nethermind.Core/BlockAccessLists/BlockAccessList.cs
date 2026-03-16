@@ -177,7 +177,7 @@ public class BlockAccessList : IEquatable<BlockAccessList>, IJournal<int>
 
         if (!accountChanges.HasStorageChange(key))
         {
-            accountChanges.AddStorageRead(key);
+            accountChanges.AddStorageRead(key, Index);
         }
     }
 
@@ -259,7 +259,7 @@ public class BlockAccessList : IEquatable<BlockAccessList>, IJournal<int>
         }
         else
         {
-            accountChanges.ClearEmptySlotChangesAndAddRead(key);
+            accountChanges.ClearEmptySlotChangesAndAddRead(key, Index);
         }
     }
 
@@ -315,7 +315,7 @@ public class BlockAccessList : IEquatable<BlockAccessList>, IJournal<int>
                         accountChanges.RemoveStorageRead(change.Slot.Value);
                     }
 
-                    accountChanges.ClearEmptySlotChangesAndAddRead(change.Slot!.Value);
+                    accountChanges.ClearEmptySlotChangesAndAddRead(change.Slot!.Value, Index);
                     break;
             }
         }
@@ -336,7 +336,7 @@ public class BlockAccessList : IEquatable<BlockAccessList>, IJournal<int>
                     accountChanges.NonceChangeAtIndex(index),
                     accountChanges.CodeChangeAtIndex(index),
                     accountChanges.SlotChangesAtIndex(index),
-                    isPostExecutionSystemContract ? 0 : accountChanges.StorageReads.Count
+                    isPostExecutionSystemContract ? 0 : accountChanges.StorageReadsCountAtIndex(index)
                 );
         }
     }
