@@ -47,7 +47,13 @@ namespace Nethermind.Consensus.Processing
 
                     if (gasRemaining is not null)
                     {
-                        gasRemaining -= currentTx.SpentGas;
+                        // EIP-8037: Use BlockGasUsed (regular gas for block accounting) instead of
+                        // SpentGas (max(regular, state)). With 2D gas metering, block.GasUsed =
+                        // max(sum_regular, sum_state), but sum(max(r_i, s_i)) >= max(sum_r, sum_s)
+                        // (subadditivity of max), causing gasRemaining to go negative when using
+                        // SpentGas. BlockGasUsed = regular gas (pre-refund), so
+                        // sum(BlockGasUsed) = sum_regular <= block.GasUsed.
+                        gasRemaining -= currentTx.BlockGasUsed;
                         _balBuilder.ValidateBlockAccessList(block.Header, (ushort)(i + 1), gasRemaining!.Value);
                     }
                 }
