@@ -477,12 +477,10 @@ namespace Nethermind.Evm.TransactionProcessing
                 return TransactionResult.GasLimitBelowIntrinsicGas;
             }
 
-            // EIP-8037: With 2D gas accounting, block gasUsed = max(sum_regular, sum_state).
-            // Individual tx gas limits are validated against the full block gas limit,
-            // not the remaining gas, because the dimensions don't accumulate linearly.
-            long maxTransactionGasLimit = spec.IsEip8037Enabled
-                ? header.GasLimit
-                : header.GasLimit - header.GasUsed;
+            // EIP-8037: header.GasUsed = max(cumulative_regular, cumulative_state) from the tracer.
+            // Using header.GasLimit - header.GasUsed is a conservative check that works for both
+            // dimensions: both regular and state remaining capacity >= header.GasLimit - header.GasUsed.
+            long maxTransactionGasLimit = header.GasLimit - header.GasUsed;
             if (tx.GasLimit > maxTransactionGasLimit)
             {
                 TraceLogInvalidTx(tx, $"BLOCK_GAS_LIMIT_EXCEEDED {tx.GasLimit} > {maxTransactionGasLimit}");
@@ -978,16 +976,27 @@ namespace Nethermind.Evm.TransactionProcessing
                 if (Logger.IsTrace)
                     Logger.Trace("Refunding unused gas of " + TGasPolicy.GetRemainingGas(in gasAfterExecution) + " and refund of " + actualRefund);
             }
-            else if (codeInsertRefunds > 0)
+            else
             {
-                // On error, only regular refund applies; state refund is not applied.
-                long codeInsertRegularRefund = TGasPolicy.GetCodeInsertRegularRefund(codeInsertRefunds, spec);
-                if (codeInsertRegularRefund > 0)
+                // EIP-8037: On exceptional halt, all regular gas is consumed (gas_left = 0)
+                // but the state gas reservoir is preserved and returned to the sender.
+                // The reservoir is NOT consumed on error because state changes are reverted.
+                if (spec.IsEip8037Enabled)
                 {
-                    actualRefund = CalculateClaimableRefund(spentGas, codeInsertRegularRefund, spec);
+                    spentGas -= TGasPolicy.GetStateReservoir(in gasAfterExecution);
+                }
 
-                    if (Logger.IsTrace)
-                        Logger.Trace("Refunding delegations only: " + actualRefund);
+                if (codeInsertRefunds > 0)
+                {
+                    // On error, only regular refund applies; state refund is not applied.
+                    long codeInsertRegularRefund = TGasPolicy.GetCodeInsertRegularRefund(codeInsertRefunds, spec);
+                    if (codeInsertRegularRefund > 0)
+                    {
+                        actualRefund = CalculateClaimableRefund(spentGas, codeInsertRegularRefund, spec);
+
+                        if (Logger.IsTrace)
+                            Logger.Trace("Refunding delegations only: " + actualRefund);
+                    }
                 }
             }
 
