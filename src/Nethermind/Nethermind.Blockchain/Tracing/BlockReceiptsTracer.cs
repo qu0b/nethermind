@@ -90,6 +90,10 @@ public class BlockReceiptsTracer : IBlockTracer, ITxTracer, IJournal<int>, ITxTr
         // EIP-8037: block gasUsed = max(sum_regular, sum_state). Override header accumulation.
         Block.Header.GasUsed = Math.Max(cumulativeBlockGas, cumulativeBlockStateGas);
 
+        int txIdx = _cumulativeBlockGasPerTx.Count - 1;
+        if (gasConsumed.BlockStateGas > 0 && Block.Number >= 8)
+            Console.WriteLine($"[GAS] b={Block.Number} t={txIdx} r={gasConsumed.EffectiveBlockGas} s={gasConsumed.BlockStateGas} cr={cumulativeBlockGas} cs={cumulativeBlockStateGas} h={Block.Header.GasUsed} tx={CurrentTx?.Hash?.ToString()?.Substring(0,10)}");
+
         // Track cumulative receipt gas (post-refund)
         _cumulativeReceiptGas += gasConsumed.SpentGas;
 

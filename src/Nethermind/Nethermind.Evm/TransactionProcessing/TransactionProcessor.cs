@@ -466,10 +466,10 @@ namespace Nethermind.Evm.TransactionProcessing
             long minGasRequired = spec.IsEip8037Enabled
                 ? Math.Max(TGasPolicy.GetRemainingGas(in standard) + TGasPolicy.GetStateReservoir(in standard), TGasPolicy.GetRemainingGas(in minimal))
                 : TGasPolicy.GetRemainingGas(in minimal);
-            return ValidateGas(tx, header, minGasRequired);
+            return ValidateGas(tx, header, spec, minGasRequired);
         }
 
-        protected virtual TransactionResult ValidateGas(Transaction tx, BlockHeader header, long minGasRequired)
+        protected virtual TransactionResult ValidateGas(Transaction tx, BlockHeader header, IReleaseSpec spec, long minGasRequired)
         {
             if (tx.GasLimit < minGasRequired)
             {
@@ -477,9 +477,15 @@ namespace Nethermind.Evm.TransactionProcessing
                 return TransactionResult.GasLimitBelowIntrinsicGas;
             }
 
-            if (tx.GasLimit > header.GasLimit - header.GasUsed)
+            // EIP-8037: With 2D gas accounting, block gasUsed = max(sum_regular, sum_state).
+            // Individual tx gas limits are validated against the full block gas limit,
+            // not the remaining gas, because the dimensions don't accumulate linearly.
+            long maxTransactionGasLimit = spec.IsEip8037Enabled
+                ? header.GasLimit
+                : header.GasLimit - header.GasUsed;
+            if (tx.GasLimit > maxTransactionGasLimit)
             {
-                TraceLogInvalidTx(tx, $"BLOCK_GAS_LIMIT_EXCEEDED {tx.GasLimit} > {header.GasLimit} - {header.GasUsed}");
+                TraceLogInvalidTx(tx, $"BLOCK_GAS_LIMIT_EXCEEDED {tx.GasLimit} > {maxTransactionGasLimit}");
                 return TransactionResult.BlockGasLimitExceeded;
             }
 
