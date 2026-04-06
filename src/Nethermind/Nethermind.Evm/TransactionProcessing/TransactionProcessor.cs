@@ -466,10 +466,10 @@ namespace Nethermind.Evm.TransactionProcessing
             long minGasRequired = spec.IsEip8037Enabled
                 ? Math.Max(TGasPolicy.GetRemainingGas(in standard) + TGasPolicy.GetStateReservoir(in standard), TGasPolicy.GetRemainingGas(in minimal))
                 : TGasPolicy.GetRemainingGas(in minimal);
-            return ValidateGas(tx, header, minGasRequired);
+            return ValidateGas(tx, header, spec, minGasRequired);
         }
 
-        protected virtual TransactionResult ValidateGas(Transaction tx, BlockHeader header, long minGasRequired)
+        protected virtual TransactionResult ValidateGas(Transaction tx, BlockHeader header, IReleaseSpec spec, long minGasRequired)
         {
             if (tx.GasLimit < minGasRequired)
             {
@@ -477,9 +477,15 @@ namespace Nethermind.Evm.TransactionProcessing
                 return TransactionResult.GasLimitBelowIntrinsicGas;
             }
 
-            if (tx.GasLimit > header.GasLimit - header.GasUsed)
+            // EIP-8037: With 2D gas accounting, block gasUsed = max(sum_regular, sum_state).
+            // Individual tx gas limits are validated against the full block gas limit,
+            // not the remaining gas, because the dimensions don't accumulate linearly.
+            long maxTransactionGasLimit = spec.IsEip8037Enabled
+                ? header.GasLimit
+                : header.GasLimit - header.GasUsed;
+            if (tx.GasLimit > maxTransactionGasLimit)
             {
-                TraceLogInvalidTx(tx, $"BLOCK_GAS_LIMIT_EXCEEDED {tx.GasLimit} > {header.GasLimit} - {header.GasUsed}");
+                TraceLogInvalidTx(tx, $"BLOCK_GAS_LIMIT_EXCEEDED {tx.GasLimit} > {maxTransactionGasLimit}");
                 return TransactionResult.BlockGasLimitExceeded;
             }
 
@@ -763,7 +769,19 @@ namespace Nethermind.Evm.TransactionProcessing
                     {
                         if (!DeployContract(spec, env.ExecutingAccount, in substate, in accessedItems, ref gasAvailable))
                         {
-                            goto FailContractCreate;
+                            // Code deposit failure: initcode succeeded but code deposit
+                            // OOG'd or code was invalid. State is reverted, all regular
+                            // gas is burned, but block-level state gas accounting must
+                            // include execution state gas (e.g., GAS_CREATE from internal
+                            // CREATEs during initcode), not just intrinsic state gas.
+                            // Use the normal Refund path with gasAvailable (which has the
+                            // execution gas state) rather than RefundOnFailContractCreation
+                            // which only accounts for intrinsic state gas.
+                            if (Logger.IsTrace) Logger.Trace("Restoring state from before transaction");
+                            WorldState.Restore(snapshot);
+                            substate = new TransactionSubstate(EvmExceptionType.OutOfGas, tracer.IsTracing);
+                            gasConsumed = Refund(tx, header, spec, opts, in substate, gasAvailable, VirtualMachine.TxExecutionContext.GasPrice, delegationRefunds, gas.FloorGas, gas.Standard);
+                            goto Complete;
                         }
                     }
 
