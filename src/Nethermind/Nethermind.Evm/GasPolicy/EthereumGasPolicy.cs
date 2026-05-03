@@ -149,11 +149,22 @@ public struct EthereumGasPolicy : IGasPolicy<EthereumGasPolicy>
     public static void RevertRefundToHalt(ref EthereumGasPolicy parentGas, in EthereumGasPolicy childGas, long initialStateReservoir, long childStateRefund)
     {
         // Code deposit failure is an exceptional halt: the child's state is reverted.
-        // Refund already added child.StateReservoir, child.StateGasUsed, and child.StateGasSpill to parent.
-        // Halt semantics discard child's StateGasUsed and return it to the reservoir.
+        // Refund already added child.StateReservoir, child.StateGasUsed, AND child.StateGasSpill
+        // to the parent (Refund propagates all four). Halt semantics (mirroring
+        // RestoreChildStateGasOnHalt) require we now:
+        //   1. Restore the reservoir to its initial-at-frame-entry value, dropping child.StateGasUsed.
+        //   2. Drop child.StateGasSpill from the parent — exceptional halt burns the child's
+        //      regular gas including the spill portion that was charged via gas_left. Leaving
+        //      it in parent.StateGasSpill would let Calculate8037BlockRegularGas's
+        //      `- StateGasSpill` subtraction under-count block.gasUsed when sum_regular
+        //      dominates. This was the missing step that caused devnet-6 block 1788's
+        //      HeaderGasUsedMismatch -112704 (= 3 × SSetState worth of child-CREATE-init-code
+        //      SSTORE-cold spill leaking into the parent on code-deposit failure). See
+        //      ~/devnet-6/BUGS.md B-002.
         _ = childStateRefund;
         parentGas.StateReservoir += GetRestoredChildStateReservoir(in childGas, initialStateReservoir) - childGas.StateReservoir;
         parentGas.StateGasUsed -= childGas.StateGasUsed;
+        parentGas.StateGasSpill -= childGas.StateGasSpill;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
