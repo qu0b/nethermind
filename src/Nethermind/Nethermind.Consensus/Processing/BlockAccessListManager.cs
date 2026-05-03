@@ -177,6 +177,8 @@ public class BlockAccessListManager(
 
         long totalRegularGas = 0;
         long totalStateGas = 0;
+        // QU0B-DEBUG: B-003 investigation — log loop start, plus per-tx accumulator trace.
+        System.Console.Error.WriteLine("QU0B-PERTX-LOOP-START blk=" + block.Number + " txCount=" + len);
         for (int chunkStart = 0; chunkStart < len; chunkStart += GasValidationChunkSize)
         {
             if (token.IsCancellationRequested)
@@ -188,6 +190,8 @@ public class BlockAccessListManager(
             for (int j = chunkStart; j < chunkEnd; j++)
             {
                 (long blockGasUsed, long blockStateGasUsed, InvalidBlockException? ex) = gasResults[j].Task.GetAwaiter().GetResult();
+                long _qu0bTxGl = block.Transactions[j].GasLimit;
+                System.Console.Error.WriteLine("QU0B-PERTX idx=" + j + " gl=" + _qu0bTxGl + " bgu=" + blockGasUsed + " bsgu=" + blockStateGasUsed + " trBefore=" + totalRegularGas + " tsBefore=" + totalStateGas + " hasEx=" + (ex is not null ? "1" : "0"));
 
                 // Surface the worker's original tx-rejection reason before running any
                 // downstream gas accounting. Otherwise CheckGasUsed (or the admission rule)
@@ -196,12 +200,6 @@ public class BlockAccessListManager(
                 // a rejected tx.
                 if (ex is not null)
                     throw new ParallelExecutionException(ex);
-
-                // QU0B-DEBUG: per-tx accumulator trace for B-003 investigation.
-                // Emit `(blkNum, idx, blockGasUsed, blockStateGasUsed, totalRegular, totalState)` per tx,
-                // identifiable by the QU0B-PERTX prefix for easy grep.
-                System.Console.Error.WriteLine(
-                    $"QU0B-PERTX blk={block.Number} idx={j} txGasLimit={block.Transactions[j].GasLimit} blockGasUsed={blockGasUsed} blockStateGasUsed={blockStateGasUsed} totalRegularBefore={totalRegularGas} totalStateBefore={totalStateGas}");
 
                 ValidateTransactionGasAllowance(block, j, totalRegularGas, totalStateGas);
 
