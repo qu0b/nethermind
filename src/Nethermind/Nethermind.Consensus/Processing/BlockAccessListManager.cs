@@ -197,6 +197,12 @@ public class BlockAccessListManager(
                 if (ex is not null)
                     throw new ParallelExecutionException(ex);
 
+                // QU0B-DEBUG: per-tx accumulator trace for B-003 investigation.
+                // Emit `(blkNum, idx, blockGasUsed, blockStateGasUsed, totalRegular, totalState)` per tx,
+                // identifiable by the QU0B-PERTX prefix for easy grep.
+                System.Console.Error.WriteLine(
+                    $"QU0B-PERTX blk={block.Number} idx={j} txGasLimit={block.Transactions[j].GasLimit} blockGasUsed={blockGasUsed} blockStateGasUsed={blockStateGasUsed} totalRegularBefore={totalRegularGas} totalStateBefore={totalStateGas}");
+
                 ValidateTransactionGasAllowance(block, j, totalRegularGas, totalStateGas);
 
                 totalRegularGas += blockGasUsed;
