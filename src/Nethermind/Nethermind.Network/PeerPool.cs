@@ -91,7 +91,18 @@ namespace Nethermind.Network
 
         public Peer GetOrAdd(Node node)
         {
-            if (Peers.TryGetValue(node.Id, out Peer? existing)) return existing;
+            if (Peers.TryGetValue(node.Id, out Peer? existing))
+            {
+                // The first record for a node may carry no TCP port (Port == 0), which leaves it undiallable.
+                // Adopt the port as soon as a record that does carry one arrives, otherwise the peer stays
+                // unreachable for the lifetime of the process.
+                if (existing.Node.Port == 0 && node.Port != 0 && existing.Node.Address.Address.Equals(node.Address.Address))
+                {
+                    existing.Node.Port = node.Port;
+                }
+
+                return existing;
+            }
 
             // ConcurrentDictionary may run the factory on a losing thread; only the thread whose value is
             // actually inserted (reference-equal) fires PeerAdded.

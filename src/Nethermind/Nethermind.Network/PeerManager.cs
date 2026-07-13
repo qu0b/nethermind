@@ -950,6 +950,14 @@ namespace Nethermind.Network
 
         private bool CanConnectToPeer(Peer peer)
         {
+            // Port == 0 means the TCP endpoint is not known, so there is nothing to dial. SelectAndRankCandidates
+            // filters these (FilteredByZeroPort); the peer-added fast path reaches ConnectAsync without passing
+            // through it, so it has to check here too.
+            if (peer.Node.Port == 0)
+            {
+                return false;
+            }
+
             if (_stats.FindCompatibilityValidationResult(peer.Node).HasValue)
             {
                 if (_logger.IsTrace) TraceFailedCompatibilityConnection();

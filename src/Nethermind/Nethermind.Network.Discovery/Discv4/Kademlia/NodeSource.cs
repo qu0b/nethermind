@@ -137,7 +137,12 @@ public sealed class NodeSource(
         }
     }
 
-    private bool IsExcluded(Node node) => node.IdHash.Equals(_currentNodeHash) || HasIncompatibleForkId(node);
+    // A node whose TCP port is not known yet is stored with Port == 0 (a discv4 Neighbors entry may advertise
+    // tcp=0, and Pong carries no TCP port at all). Such a node cannot be dialled, and feeding it to p2p poisons
+    // the peer pool: PeerPool keeps the first Node it sees for an id, so the undiallable record outlives the
+    // routing table learning the real port from an inbound Ping. Skip it - the discovery loop re-emits the node
+    // once the routing table holds a diallable endpoint.
+    private bool IsExcluded(Node node) => node.IdHash.Equals(_currentNodeHash) || node.Port == 0 || HasIncompatibleForkId(node);
 
     private bool HasIncompatibleForkId(Node node)
     {
