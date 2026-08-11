@@ -3,6 +3,7 @@
 
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Text;
 using System.Threading.Channels;
 using Nethermind.Config;
 using Nethermind.Db;
@@ -306,7 +307,7 @@ public class FlatDbManager : IFlatDbManager, IAsyncDisposable
                 continue;
             }
 
-            if (_logger.IsTrace) _logger.Trace($"Gathered {baseBlock}. Got {assembled.InMemory.Count} known states, {assembled.Persisted.Count} persisted, Reader state: {persistenceReader.CurrentState}. Persistence state: {_persistenceManager.GetCurrentPersistedStateId()}");
+            if (_logger.IsTrace) _logger.Trace($"Gathered {baseBlock}. Got {assembled.InMemory.Count} known states, {assembled.Persisted.Count} persisted{DescribeChain(assembled)}, Reader state: {persistenceReader.CurrentState}. Persistence state: {_persistenceManager.GetCurrentPersistedStateId()}");
 
             ReportBundleMetrics(assembled);
 
@@ -321,6 +322,21 @@ public class FlatDbManager : IFlatDbManager, IAsyncDisposable
 
             return res;
         }
+    }
+
+    /// <summary>
+    /// The assembled chain's block ranges, oldest first, for the gather trace. Counts alone cannot show
+    /// whether the chain actually tiles the gap down to the reader — the question every stale-read
+    /// investigation starts with.
+    /// </summary>
+    private static string DescribeChain(in AssembledSnapshotResult assembled)
+    {
+        StringBuilder sb = new(" [");
+        for (int i = 0; i < assembled.Persisted.Count; i++)
+            sb.Append($"P{assembled.Persisted[i].From.BlockNumber}->{assembled.Persisted[i].To.BlockNumber} ");
+        for (int i = 0; i < assembled.InMemory.Count; i++)
+            sb.Append($"M{assembled.InMemory[i].From.BlockNumber}->{assembled.InMemory[i].To.BlockNumber} ");
+        return sb.Append(']').ToString();
     }
 
     private static void ReportBundleMetrics(in AssembledSnapshotResult assembled)
