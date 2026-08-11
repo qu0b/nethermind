@@ -383,14 +383,24 @@ public class PersistedSnapshotRepositoryTests
                     $"AddressKey for base {i} must be in the widest snapshot's merged bloom");
             }
 
-            // Each contained base adopts the widest snapshot's bloom (the same instance), not its own.
+            // A contained base must NOT adopt the widest snapshot's bloom. Containment is decided on
+            // block height alone, so adoption cannot tell a base this merge actually consumed from one
+            // that merely sits inside the range — a sibling fork at the same heights, or one registered
+            // after the sources were read. Handed a bloom that does not cover its keys, the base tests
+            // negative, the read skips it, and the lookup falls through to the persistence reader,
+            // silently returning the base block's state.
             for (int i = 1; i <= 4; i++)
             {
                 Assert.That(repo2.TryLeasePersistedState(ids[i], SnapshotTier.PersistedBase, out PersistedSnapshot? baseAt), Is.True,
                     $"base at ids[{i}] must round-trip under v7");
                 using (baseAt)
-                    Assert.That(ReferenceEquals(baseAt!.Bloom, shared), Is.True,
-                        $"base {i} must share the widest snapshot's bloom");
+                {
+                    Assert.That(ReferenceEquals(baseAt!.Bloom, shared), Is.False,
+                        $"base {i} must not adopt the widest snapshot's bloom");
+                    ulong ownKey = PersistedSnapshotBloomBuilder.AddressKey(TestItem.Addresses[i - 1]);
+                    Assert.That(baseAt.Bloom.MightContain(ownKey), Is.True,
+                        $"base {i} must never filter out a key it holds");
+                }
             }
         }
     }
@@ -493,16 +503,18 @@ public class PersistedSnapshotRepositoryTests
         using (PersistedSnapshotList chain = repo2.LeaseBaseSnapshotsInRange(ids[0], ids[N]))
             Assert.That(chain.Count, Is.EqualTo(N), "every base must be reachable via the From chain");
 
-        // Bloom end-state: a bloom is rebuilt for the widest snapshot covering each range and shared
-        // across it — base ids[1] adopts the CompactSized covering (0, 8] rather than carrying its own.
+        // Bloom end-state: a bloom is rebuilt for the widest snapshot covering each range, and only for
+        // that snapshot. Base ids[1] keeps its own rather than adopting the CompactSized covering (0, 8],
+        // whose key set is a superset only of what that merge consumed, not of everything sitting inside
+        // its block range.
         Assert.That(repo2.TryLeasePersistedState(ids[8], SnapshotTier.PersistedCompactSized, out PersistedSnapshot? compactSizedAt8), Is.True);
         using (compactSizedAt8)
         {
             Assert.That(compactSizedAt8!.Bloom.Count, Is.GreaterThan(0), "CompactSized at ids[8] must have a real bloom");
             Assert.That(repo2.TryLeasePersistedState(ids[1], SnapshotTier.PersistedBase, out PersistedSnapshot? baseAt1), Is.True);
             using (baseAt1)
-                Assert.That(ReferenceEquals(baseAt1!.Bloom, compactSizedAt8.Bloom), Is.True,
-                    "base ids[1] must share the CompactSized's bloom");
+                Assert.That(ReferenceEquals(baseAt1!.Bloom, compactSizedAt8.Bloom), Is.False,
+                    "base ids[1] must not adopt the CompactSized's bloom");
         }
     }
 

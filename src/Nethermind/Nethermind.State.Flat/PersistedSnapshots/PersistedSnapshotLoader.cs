@@ -146,17 +146,24 @@ public sealed class PersistedSnapshotLoader(
     }
 
     /// <summary>
-    /// Rebuild a bloom only for each widest snapshot covering the persisted tier and share it across its
-    /// range, so the narrower contained snapshots adopt it instead of each carrying its own — mirroring
-    /// the runtime layout a large compaction leaves behind. Snapshots no widest one covers keep their
-    /// AlwaysTrue placeholder (correct — never a false negative — just unfiltered).
+    /// Rebuild a bloom for each widest snapshot covering the persisted tier. Every other loaded snapshot
+    /// keeps its AlwaysTrue placeholder — correct, never a false negative, just unfiltered.
     /// </summary>
     /// <remarks>
     /// Assembles the widest-first chain via the main read-path <see cref="ISnapshotRepository.AssembleSnapshots"/>
     /// (its <c>EdgePriority</c> leads with the large skip-pointers), so the chain tiles
     /// <c>(committed, head]</c> with the fewest, widest snapshots. The committed base it targets is the
     /// oldest loaded snapshot's <c>From</c>. The few wide blooms are rebuilt in parallel; chain ranges are
-    /// disjoint, so the per-range <see cref="ISnapshotRepository.ShareBloomAcrossRange"/> calls don't collide.
+    /// disjoint, so the per-snapshot replacements don't collide.
+    ///
+    /// The rebuilt bloom is NOT shared with the snapshots contained in the wide one's block range.
+    /// <see cref="ISnapshotRepository.ShareBloomAcrossRange"/> is safe at runtime, where a large
+    /// compaction has just merged the range and its key set is a superset by construction. On reload
+    /// there is no such guarantee: containment is decided on block height alone, so a snapshot that
+    /// merely sits inside the range — a sibling fork at the same heights, or one written after the wide
+    /// snapshot was merged — adopts a bloom that does not cover its keys. Its entries then test negative,
+    /// the read skips a snapshot that holds the value, and the lookup falls through to the persistence
+    /// reader, silently returning the base block's state instead of the correct one.
     /// </remarks>
     private void ReconstructBloom(List<CatalogEntry> entries)
     {
@@ -177,16 +184,21 @@ public sealed class PersistedSnapshotLoader(
         assembled.InMemory.Dispose();
         using PersistedSnapshotList widest = assembled.Persisted;
 
-        // Build the (few, wide) blooms in parallel and share each across its range. A fresh bloom
-        // (refcount 1) is leased by each snapshot ShareBloomAcrossRange re-registers; the local lease is
-        // released on dispose, leaving the shared snapshots holding theirs.
+        // Build the (few, wide) blooms in parallel and re-register each carrying snapshot over its own
+        // reservation. A fresh bloom (refcount 1) is leased by the twin; the local lease is released on
+        // dispose, leaving the registered twin holding it.
         Parallel.ForEach(widest, snap =>
         {
             RefCountedBloomFilter bloom;
             using (WholeReadSession session = snap.BeginWholeReadSession())
                 bloom = new RefCountedBloomFilter(PersistedSnapshotBloomBuilder.Build(session, snap, _bloomBitsPerKey));
             using (bloom)
-                repository.ShareBloomAcrossRange(snap.From, snap.To, bloom, blobs);
+            {
+                bloom.AcquireLease();
+                using PersistedSnapshot twin = new(snap.From, snap.To, snap.Reservation, blobs, snap.Tier, bloom);
+                // false on a racing prune → the twin's `using` drops the cloned lease, self-healing.
+                repository.ReplacePersistedSnapshot(snap.To, twin, snap.Tier);
+            }
         });
     }
 
