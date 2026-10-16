@@ -54,9 +54,9 @@ public class BlockForRpc
         MixHash = block.MixHash;
         Nonce = block.Nonce;
 
-        if (specProvider is not null)
+        IReleaseSpec? spec = specProvider?.GetSpec(block.Header);
+        if (spec is not null)
         {
-            IReleaseSpec spec = specProvider.GetSpec(block.Header);
             if (spec.IsEip1559Enabled)
             {
                 BaseFeePerGas = block.Header.BaseFeePerGas;
@@ -96,7 +96,7 @@ public class BlockForRpc
         if (!skipTxs)
         {
             Transactions = includeFullTransactionData
-                    ? GetTransactionsForRpc(block, specProvider.ChainId)
+                    ? BlockTransactions.FromBlock(block, specProvider.ChainId, spec)
                     : GetTransactionHashes(block.Transactions);
         }
         TransactionsRoot = block.TxRoot;
@@ -182,8 +182,6 @@ public class BlockForRpc
         }
         return hashes;
     }
-
-    private static BlockTransactions GetTransactionsForRpc(Block block, ulong chainId) => BlockTransactions.FromBlock(block, chainId);
 
     private static Hash256[] GetUnclesHashes(BlockHeader[] headers)
     {

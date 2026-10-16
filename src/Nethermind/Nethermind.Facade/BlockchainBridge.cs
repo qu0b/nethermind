@@ -133,7 +133,8 @@ namespace Nethermind.Facade
                     txIndex: txReceipt!.Index,
                     blockTimestamp: block.Timestamp,
                     baseFee: block.BaseFeePerGas,
-                    receipt: txReceipt);
+                    receipt: txReceipt)
+                { Spec = specProvider.GetSpec(block.Header) };
 
 
                 result = new TransactionLookupResult(tx, extraData);
@@ -142,7 +143,8 @@ namespace Nethermind.Facade
 
             if (checkTxnPool && txPool.TryGetPendingTransaction(txHash, out Transaction? transaction))
             {
-                result = new TransactionLookupResult(transaction, new(specProvider.ChainId));
+                result = new TransactionLookupResult(transaction, new(specProvider.ChainId)
+                { Spec = blockTree.Head is { } head ? specProvider.GetSpec(head.Header) : null });
                 return true;
             }
 

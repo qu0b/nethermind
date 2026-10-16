@@ -23,8 +23,8 @@ public class FrameTransactionForRpc : EIP1559TransactionForRpc, IFromTransaction
     public UInt256[]? NonceKeys { get; set; }
 
     /// <summary>EIP-8141 <c>frames</c>, in execution order; the field that discriminates this envelope.</summary>
-    /// <remarks>The transaction's <c>gas</c> is their summed limits, so a frame's own budget is read here
-    /// rather than from that total.</remarks>
+    /// <remarks>The transaction's <c>gas</c> is the whole budget derived from them, so a frame's own budget is read
+    /// here rather than from that total.</remarks>
     [JsonDiscriminator]
     public FrameForRpc[]? Frames { get; set; }
 
@@ -42,6 +42,27 @@ public class FrameTransactionForRpc : EIP1559TransactionForRpc, IFromTransaction
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     public byte[][]? BlobVersionedHashes { get; set; }
 
+    /// <summary>Omitted from the response: a frame transaction carries no access list.</summary>
+    /// <remarks>Hides rather than overrides the base list, which also discriminates the access-list types.</remarks>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public new AccessListForRpc? AccessList { get; set; }
+
+    // A frame transaction carries no ECDSA envelope signature (its entries are in Signatures), so the zeros the
+    // base types would report read as a real one; these are omitted from the response.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public override UInt256? YParity { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public override UInt256? V { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonConverter(typeof(NullableUInt256Converter))]
+    public override UInt256? R { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonConverter(typeof(NullableUInt256Converter))]
+    public override UInt256? S { get; set; }
+
     [JsonConstructor]
     public FrameTransactionForRpc() { }
 
@@ -51,6 +72,16 @@ public class FrameTransactionForRpc : EIP1559TransactionForRpc, IFromTransaction
     internal override void Populate(Transaction transaction, in TransactionForRpcContext extraData)
     {
         base.Populate(transaction, extraData);
+        AccessList = null;
+        YParity = null;
+        V = null;
+        R = null;
+        S = null;
+        // Transaction.GasLimit carries only the frame limits; gas reports max_gas, the budget the payer is charged
+        // against, when the context names the fork to price it at.
+        Gas = extraData.Spec is { } spec && FrameTxValidation.TryCalculateGasBudget(transaction, spec, out _, out _, out ulong maxGas)
+            ? maxGas
+            : transaction.GasLimit;
         NonceKeys = transaction.NonceKeys;
         Frames = FrameForRpc.FromFrames(transaction.Frames);
         Signatures = FrameSignatureForRpc.FromSignatures(transaction.FrameSignatures);

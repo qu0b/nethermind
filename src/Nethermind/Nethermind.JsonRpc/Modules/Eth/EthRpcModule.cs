@@ -589,7 +589,7 @@ public partial class EthRpcModule(
 
         return ResultWrapper<FillTransactionResult>.Success(new FillTransactionResult
         {
-            Tx = TransactionForRpc.FromTransaction(tx)
+            Tx = TransactionForRpc.FromTransaction(tx, new TransactionForRpcContext { Spec = spec })
         });
     }
 
@@ -818,12 +818,14 @@ public partial class EthRpcModule(
     public virtual ResultWrapper<TransactionForRpc[]> eth_pendingTransactions()
     {
         Transaction[] transactions = _txPool.GetPendingTransactions();
+        TransactionForRpcContext extraData = new(_specProvider.ChainId)
+        { Spec = _blockFinder.Head is { } head ? _specProvider.GetSpec(head.Header) : null };
         TransactionForRpc[] transactionsModels = new TransactionForRpc[transactions.Length];
         for (int i = 0; i < transactions.Length; i++)
         {
             Transaction transaction = transactions[i];
             RecoverTxSenderIfNeeded(transaction);
-            transactionsModels[i] = TransactionForRpc.FromTransaction(transaction, new(_specProvider.ChainId));
+            transactionsModels[i] = TransactionForRpc.FromTransaction(transaction, extraData);
             transactionsModels[i].BlockHash = Keccak.Zero;
         }
 
@@ -902,7 +904,8 @@ public partial class EthRpcModule(
             txIndex: (int)positionIndex,
             blockTimestamp: block.Timestamp,
             baseFee: block.BaseFeePerGas,
-            receipt: null);
+            receipt: null)
+        { Spec = _specProvider.GetSpec(block.Header) };
         TransactionForRpc transactionModel = TransactionForRpc.FromTransaction(transaction, extraData);
         return ResultWrapper<TransactionForRpc?>.Success(transactionModel);
     }

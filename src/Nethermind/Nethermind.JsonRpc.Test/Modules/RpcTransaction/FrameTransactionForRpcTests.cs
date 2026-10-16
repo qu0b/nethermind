@@ -7,15 +7,20 @@ using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Nethermind.Core;
+using Nethermind.Core.Collections;
 using Nethermind.Core.Crypto;
+using Nethermind.Core.Extensions;
 using Nethermind.Core.Test;
 using Nethermind.Core.Test.Builders;
 using Nethermind.Evm;
+using Nethermind.Facade.Eth;
 using Nethermind.Facade.Eth.RpcTransaction;
 using Nethermind.Int256;
 using Nethermind.JsonRpc.Converters;
 using Nethermind.JsonRpc.Data;
 using Nethermind.Serialization.Json;
+using Nethermind.Serialization.Rlp;
+using Nethermind.Specs.Forks;
 using NUnit.Framework;
 using static Nethermind.Core.Test.Builders.FrameTxTestFrames;
 
@@ -551,6 +556,85 @@ public class FrameTransactionForRpcTests
             Assert.That(tx.NonceKeys, Is.EqualTo(new UInt256[] { 1, 7 }));
             Assert.That(tx.Nonce, Is.EqualTo(3UL));
         }
+    }
+
+    /// <summary>bogota-devnet-1 block 1788, transaction 0, decoded from its canonical encoding as a block body is.</summary>
+    private static Transaction DecodeDevnetBlock1788Tx()
+    {
+        Transaction tx = new()
+        {
+            Type = TxType.FrameTx,
+            ChainId = 0x1a38c5b87,
+            Nonce = 0x29a,
+            NonceKeys = [0],
+            SenderAddress = new Address("0xd23e74bc0622087c685981e9974a426d89701053"),
+            GasPrice = 0x77359400,
+            DecodedMaxFeePerGas = 0x4a817c800,
+            MaxFeePerBlobGas = 0,
+            BlobVersionedHashes = [],
+            Frames =
+            [
+                new TxFrame(FrameMode.Verify, FrameFlags.None, new Address("0x81413f0cf12e9b6a49b1d0439e081c577d57ffff"), 5_000, UInt256.Zero, Bytes.FromHexString("0x000000006ad14794")),
+                new TxFrame(FrameMode.Verify, FrameFlags.ApproveExecutionAndPayment, null, 5_000, UInt256.Zero, ReadOnlyMemory<byte>.Empty),
+                new TxFrame(FrameMode.Sender, FrameFlags.None, new Address("0x43260ba3a86d6ec3e85a80ca2d061a77e59a55c1"), 30_000, UInt256.Zero, ReadOnlyMemory<byte>.Empty),
+            ],
+            FrameSignatures =
+            [
+                new TxFrameSignature(TxFrameSignature.SchemeSecp256k1, signer: null, msg: default,
+                    Bytes.FromHexString("0x01d2a680a209f01e26373a7413dc8b2f53d3764e4b58078c6799491fddd7e3684a4b62457e3691d5333422edad219ad68087d80894ff0f274f5dc8ec78f13abecb")),
+            ],
+        };
+
+        using ArrayPoolList<byte> encoded = TxDecoder.Instance.EncodeToArrayPoolList(tx, RlpBehaviors.SkipTypedWrapping);
+        // Copied out of the pooled buffer, which the decoded frame data would otherwise alias.
+        RlpReader reader = new(encoded.ToArray());
+        return TxDecoder.Instance.DecodeGuardNotNull(ref reader, RlpBehaviors.SkipTypedWrapping);
+    }
+
+    /// <remarks>
+    /// A frame transaction has no <c>gas_limit</c> field: <c>gas</c> is EIP-8141 <c>max_gas</c>, the budget the payer
+    /// is charged against, not the frame limits <see cref="Transaction.GasLimit"/> carries (here 40,000). Geth reports
+    /// the same 0xe051 (57,425) for this transaction.
+    /// </remarks>
+    [Test]
+    public void FrameTransactionForRpc_ReportsMaxGasAsGas()
+    {
+        Transaction tx = DecodeDevnetBlock1788Tx();
+
+        TransactionForRpc rpc = TransactionForRpc.FromTransaction(tx, new TransactionForRpcContext { Spec = FramesDevnet1.Instance });
+        using JsonDocument doc = SerializeToJson(rpc);
+
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(tx.Hash, Is.EqualTo(new Hash256("0x9bc7aee18912f786f04fea5eaead7ffcb66b6582994c4a76ce4a3fb39cb9ede4")));
+            Assert.That(tx.GasLimit, Is.EqualTo(40_000));
+            Assert.That(rpc.Gas, Is.EqualTo(57_425));
+            Assert.That(doc.RootElement.GetProperty("gas").GetString(), Is.EqualTo("0xe051"));
+        }
+    }
+
+    [Test]
+    public void FrameTransactionForRpc_WithoutASpec_FallsBackToTheFrameLimits()
+    {
+        Transaction tx = DecodeDevnetBlock1788Tx();
+
+        Assert.That(TransactionForRpc.FromTransaction(tx).Gas, Is.EqualTo(40_000));
+    }
+
+    /// <summary>A frame transaction has no access list and no ECDSA envelope signature, so the response omits them
+    /// rather than reporting zeros that read as a real signature.</summary>
+    [TestCase("accessList")]
+    [TestCase("yParity")]
+    [TestCase("v")]
+    [TestCase("r")]
+    [TestCase("s")]
+    public void FrameTransactionForRpc_OmitsFieldsTheTypeDoesNotCarry(string field)
+    {
+        TransactionForRpc rpc = TransactionForRpc.FromTransaction(DecodeDevnetBlock1788Tx(), new TransactionForRpcContext { Spec = FramesDevnet1.Instance });
+
+        using JsonDocument doc = SerializeToJson(rpc);
+
+        Assert.That(doc.RootElement.TryGetProperty(field, out _), Is.False);
     }
 
     private static readonly LogEntry FrameLog = new(TestItem.AddressC, [1, 2, 3], [TestItem.KeccakA]);

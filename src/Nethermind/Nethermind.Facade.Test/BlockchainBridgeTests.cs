@@ -157,7 +157,8 @@ public class BlockchainBridgeTests
             txIndex: receipts[index].Index,
             blockTimestamp: block.Timestamp,
             baseFee: UInt256.Zero,
-            receipt: receipts[index])));
+            receipt: receipts[index])
+        { Spec = _specProvider.GetSpec(block.Header) }));
     }
 
     [Test]

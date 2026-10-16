@@ -3,6 +3,7 @@
 
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
+using Nethermind.Core.Specs;
 using Nethermind.Facade.Eth.RpcTransaction;
 using Nethermind.Int256;
 
@@ -22,6 +23,10 @@ public readonly record struct TransactionForRpcContext
     public int? TxIndex { get; }
     public UInt256? BaseFee { get; }
     public TxReceipt? Receipt { get; }
+
+    /// <summary>The fork the transaction is priced at: its block's, or the head's for a pending one.</summary>
+    /// <remarks>A frame transaction has no <c>gas_limit</c> field, so its <c>gas</c> is derived under this spec.</remarks>
+    public IReleaseSpec? Spec { get; init; }
 
     public TransactionForRpcContext(ulong chainId)
     {
